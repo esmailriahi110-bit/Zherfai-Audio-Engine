@@ -32,5 +32,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Zherfai-VST3-Windows-x64
-         path: build/ZherfaiAudioEngine_artefacts/Release/VST3
-
+          path: build/ZherfaiAudioEngine_artefacts/Release/VST3
