@@ -1,0 +1,35 @@
+# ==============================================================================
+# Developed by Esmaeil Riahi (UID: 2240088354) | Architecture: Anti-Gravity
+# ==============================================================================
+
+name: Build Zherfai VST3 Plugin
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '3.28.x'
+
+      - name: Configure CMake
+        run: cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build VST3
+        run: cmake --build build --config Release --target ZherfaiAudioEngine_VST3
+
+      - name: Upload VST3 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zherfai-VST3-Windows-x64
+          path: build/ZherfaiAudioEngine_artefacts/Release/VST3/
