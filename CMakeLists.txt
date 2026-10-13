@@ -1,9 +1,11 @@
 # ==============================================================================
-# Developed by Esmaeil Riahi (UID: 2240088354) | Architecture: Anti-Gravity
-# Project: Zherfai AI - Autonomous Multi-Node Mix & Master Engine
+#   Developed by Esmaeil Riahi (UID: 2240088354) | Architecture: Anti-Gravity
+#   Project: Zherfai AI - Autonomous Multi-Node Mix & Master Engine
+#   Blueprint: Production Engine v2.5
 # ==============================================================================
 
 cmake_minimum_required(VERSION 3.22)
+
 project(ZherfaiAudioEngine VERSION 2.5.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -11,15 +13,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(FetchContent)
 FetchContent_Declare(
-    juce
+    JUCE
     GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-    GIT_TAG 7.0.9
-    GIT_SHALLOW TRUE
+    GIT_TAG        7.0.9
+    GIT_SHALLOW    TRUE
 )
-FetchContent_MakeAvailable(juce)
+FetchContent_MakeAvailable(JUCE)
 
 juce_add_plugin(ZherfaiAudioEngine
-    COMPANY_NAME "Zherfai"
+    COMPANY_NAME "Zherfai AI"
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE
@@ -32,13 +34,18 @@ juce_add_plugin(ZherfaiAudioEngine
     PRODUCT_NAME "Zherfai Channel Strip"
 )
 
+# Disable the manifest generation helper that causes CI runner exit code 1
+set_target_properties(ZherfaiAudioEngine PROPERTIES
+    ENABLE_VST3_MANIFEST_GENERATION FALSE
+)
+
 target_sources(ZherfaiAudioEngine
     PRIVATE
-        Source/ZherfaiSharedMemory.h
-        Source/PluginProcessor.h
         Source/PluginProcessor.cpp
-        Source/PluginEditor.h
+        Source/PluginProcessor.h
         Source/PluginEditor.cpp
+        Source/PluginEditor.h
+        Source/ZherfaiSharedMemory.h
 )
 
 target_compile_definitions(ZherfaiAudioEngine
@@ -54,5 +61,6 @@ target_link_libraries(ZherfaiAudioEngine
         juce::juce_dsp
     PUBLIC
         juce::juce_recommended_config_flags
+        juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
 )
