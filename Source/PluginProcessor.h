@@ -46,17 +46,16 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    juce::AudioProcessorValueTreeState apvts;
     StemType getDetectedStemType() const { return currentStem; }
     float getTargetGainDb() const { return smoothedGainDb.getCurrentValue(); }
 
-private:
-    juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+    juce::AudioProcessorValueTreeState apvts;
 
-    // IPC Link
+private:
+    static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+
     void initializeSharedMemory();
     void cleanupSharedMemory();
-    void updateTelemetryToMaster();
 
     #if JUCE_WINDOWS
     HANDLE hMapFile = NULL;
@@ -76,7 +75,6 @@ private:
     std::array<float, fftSize> fifo;
     std::array<float, fftSize * 2> fftData;
     int fifoIndex = 0;
-    std::atomic<bool> nextFFTBlockReady { false };
 
     // DSP Processors
     juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>> subCutFilter;
@@ -86,6 +84,12 @@ private:
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> smoothedGainDb;
     float deEsserGainReduction = 1.0f;
     double currentSampleRate = 44100.0;
+
+    // Parameter Pointers
+    std::atomic<float>* autoGainParam = nullptr;
+    std::atomic<float>* autoDeMudParam = nullptr;
+    std::atomic<float>* autoDeEssParam = nullptr;
+    std::atomic<float>* stemOverrideParam = nullptr;
 
     void computeSpectralAcoustics();
     void processDeEsser (juce::AudioBuffer<float>& buffer);
