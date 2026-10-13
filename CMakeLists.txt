@@ -11,6 +11,9 @@ project(ZherfaiAudioEngine VERSION 2.5.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Disable JUCE helper tools that crash headless CI runners
+set(JUCE_BUILD_HELPER_APPLICATIONS OFF CACHE BOOL "" FORCE)
+
 include(FetchContent)
 FetchContent_Declare(
     JUCE
@@ -32,11 +35,6 @@ juce_add_plugin(ZherfaiAudioEngine
     PLUGIN_CODE Zh01
     FORMATS VST3
     PRODUCT_NAME "Zherfai Channel Strip"
-)
-
-# Disable the manifest generation helper that causes CI runner exit code 1
-set_target_properties(ZherfaiAudioEngine PROPERTIES
-    ENABLE_VST3_MANIFEST_GENERATION FALSE
 )
 
 target_sources(ZherfaiAudioEngine
