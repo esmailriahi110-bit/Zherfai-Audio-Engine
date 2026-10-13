@@ -9,6 +9,21 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+juce::AudioProcessorValueTreeState::ParameterLayout ZherfaiAudioEngineProcessor::createParameterLayout()
+{
+    std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID ("auto_gain", 1), "Auto Gain Stage", true));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID ("auto_demud", 1), "Acoustic De-Mudding", true));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID ("auto_deess", 1), "Dynamic De-Esser", true));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        juce::ParameterID ("stem_override", 1), "Stem Mode Override",
+        juce::StringArray { "AUTO_DETECT", "SUB_LOW", "VOCAL_LEAD", "PERCUSSION", "HARMONIC_PADS" }, 0));
+    return { params.begin(), params.end() };
+}
+
 ZherfaiAudioEngineProcessor::ZherfaiAudioEngineProcessor()
     : AudioProcessor (BusesProperties().withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
                                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
@@ -18,6 +33,12 @@ ZherfaiAudioEngineProcessor::ZherfaiAudioEngineProcessor()
 {
     fifo.fill (0.0f);
     fftData.fill (0.0f);
+
+    autoGainParam = apvts.getRawParameterValue ("auto_gain");
+    autoDeMudParam = apvts.getRawParameterValue ("auto_demud");
+    autoDeEssParam = apvts.getRawParameterValue ("auto_deess");
+    stemOverrideParam = apvts.getRawParameterValue ("stem_override");
+
     initializeSharedMemory();
 }
 
@@ -26,21 +47,10 @@ ZherfaiAudioEngineProcessor::~ZherfaiAudioEngineProcessor()
     cleanupSharedMemory();
 }
 
-juce::AudioProcessorValueTreeState::ParameterLayout ZherfaiAudioEngineProcessor::createParameterLayout()
-{
-    std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
-    params.push_back (std::make_unique<juce::AudioParameterBool> ("auto_gain", "Auto Gain Stage (-18dB)", true));
-    params.push_back (std::make_unique<juce::AudioParameterBool> ("auto_demud", "Acoustic De-Mudding", true));
-    params.push_back (std::make_unique<juce::AudioParameterBool> ("auto_deess", "Dynamic De-Esser", true));
-    params.push_back (std::make_unique<juce::AudioParameterChoice> ("stem_override", "Stem Mode Override", 
-        juce::StringArray { "AUTO_DETECT", "SUB_LOW", "VOCAL_LEAD", "PERCUSSION", "HARMONIC_PADS" }, 0));
-    return { params.begin(), params.end() };
-}
-
 void ZherfaiAudioEngineProcessor::initializeSharedMemory()
 {
 #if JUCE_WINDOWS
-    hMapFile = CreateFileMappingA (INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(ZherfaiMeshMatrix), ZHERFAI_SHM_NAME);
+    hMapFile = CreateFileMappingA (INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, (DWORD)sizeof(ZherfaiMeshMatrix), ZHERFAI_SHM_NAME);
     if (hMapFile != NULL)
     {
         pSharedMatrix = (ZherfaiMeshMatrix*) MapViewOfFile (hMapFile, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(ZherfaiMeshMatrix));
@@ -65,10 +75,13 @@ void ZherfaiAudioEngineProcessor::initializeSharedMemory()
 void ZherfaiAudioEngineProcessor::cleanupSharedMemory()
 {
 #if JUCE_WINDOWS
-    if (pSharedMatrix != nullptr && assignedNodeIndex >= 0)
+    if (pSharedMatrix != nullptr)
     {
-        pSharedMatrix->channels[assignedNodeIndex].isActive.store (false);
-        pSharedMatrix->totalActiveNodes.fetch_sub (1);
+        if (assignedNodeIndex >= 0)
+        {
+            pSharedMatrix->channels[assignedNodeIndex].isActive.store (false);
+            pSharedMatrix->totalActiveNodes.fetch_sub (1);
+        }
         UnmapViewOfFile (pSharedMatrix);
         pSharedMatrix = nullptr;
     }
@@ -89,19 +102,16 @@ void ZherfaiAudioEngineProcessor::prepareToPlay (double sampleRate, int samplesP
     spec.maximumBlockSize = static_cast<juce::uint32> (samplesPerBlock);
     spec.numChannels = static_cast<juce::uint32> (getTotalNumOutputChannels());
 
-    // 1. Sub-Cut Filter: 30 Hz steep highpass
     *subCutFilter.state = *juce::dsp::IIR::Coefficients<float>::makeHighPass (sampleRate, 32.0f, 0.707f);
     subCutFilter.prepare (spec);
 
-    // 2. De-Mud Filter: Variable dynamic notch targeting 320 Hz
     *deMudFilter.state = *juce::dsp::IIR::Coefficients<float>::makePeakFilter (sampleRate, 320.0f, 2.5f, 0.707f);
     deMudFilter.prepare (spec);
 
-    // 3. De-Esser Bandpass Monitor: Centered at 6.8 kHz
     *deEsserBandpass.state = *juce::dsp::IIR::Coefficients<float>::makeBandPass (sampleRate, 6800.0f, 1.8f);
     deEsserBandpass.prepare (spec);
 
-    smoothedGainDb.reset (sampleRate, 0.05); // 50ms smoothing window to eliminate clicking
+    smoothedGainDb.reset (sampleRate, 0.05);
     smoothedGainDb.setCurrentAndTargetValue (0.0f);
 }
 
@@ -148,9 +158,8 @@ void ZherfaiAudioEngineProcessor::computeSpectralAcoustics()
 
     float centroid = weightedSum / totalEnergy;
     
-    // Automatic Role Classification
-    auto overrideChoice = apvts.getRawParameterValue ("stem_override")->load();
-    if (overrideChoice == 0) // AUTO_DETECT
+    int overrideChoice = stemOverrideParam != nullptr ? static_cast<int> (stemOverrideParam->load()) : 0;
+    if (overrideChoice == 0)
     {
         if (subEnergy / totalEnergy > 0.45f)
             currentStem = STEM_SUB_LOW;
@@ -163,7 +172,7 @@ void ZherfaiAudioEngineProcessor::computeSpectralAcoustics()
     }
     else
     {
-        currentStem = static_cast<StemType> (static_cast<int> (overrideChoice));
+        currentStem = static_cast<StemType> (overrideChoice);
     }
 
     if (pSharedMatrix != nullptr && assignedNodeIndex >= 0)
@@ -186,19 +195,20 @@ void ZherfaiAudioEngineProcessor::processDeEsser (juce::AudioBuffer<float>& buff
     if (sidechainBuffer.getNumChannels() > 1)
         sibilanceEnergy = std::max (sibilanceEnergy, sidechainBuffer.getRMSLevel (1, 0, sidechainBuffer.getNumSamples()));
 
-    float threshold = 0.08f; // Dynamic sibilance limit
+    float threshold = 0.08f;
     if (sibilanceEnergy > threshold)
     {
         float overDb = juce::Decibels::gainToDecibels (sibilanceEnergy / threshold);
         float attenuation = std::clamp (1.0f - (overDb * 0.08f), 0.55f, 1.0f);
-        deEsserGainReduction = deEsserGainReduction * 0.7f + attenuation * 0.3f; // Ultra-fast attack
+        deEsserGainReduction = deEsserGainReduction * 0.7f + attenuation * 0.3f;
     }
     else
     {
-        deEsserGainReduction = deEsserGainReduction * 0.95f + 1.0f * 0.05f; // Fast release
+        deEsserGainReduction = deEsserGainReduction * 0.95f + 1.0f * 0.05f;
     }
 
-    if (currentStem == STEM_VOCAL_LEAD && apvts.getRawParameterValue ("auto_deess")->load())
+    bool deessEnabled = autoDeEssParam != nullptr && autoDeEssParam->load() > 0.5f;
+    if (currentStem == STEM_VOCAL_LEAD && deessEnabled)
     {
         buffer.applyGain (deEsserGainReduction);
     }
@@ -214,7 +224,6 @@ void ZherfaiAudioEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear (i, 0, numSamples);
 
-    // 1. Feature Extraction Stream
     const float* channelData = buffer.getReadPointer (0);
     int zeroCrossings = 0;
     for (int i = 0; i < numSamples; ++i)
@@ -234,7 +243,6 @@ void ZherfaiAudioEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer
             zeroCrossings++;
     }
 
-    // 2. Continuous RMS & Crest Factor
     float rms = 0.0f;
     for (int ch = 0; ch < totalNumInputChannels; ++ch)
         rms = std::max (rms, buffer.getRMSLevel (ch, 0, numSamples));
@@ -243,8 +251,8 @@ void ZherfaiAudioEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer
     float peakDb = juce::Decibels::gainToDecibels (buffer.getMagnitude (0, numSamples) + 1e-5f);
     float crestFactor = peakDb - rmsDb;
 
-    // 3. Auto Gain Staging (-18 dBFS RMS Anchor)
-    if (apvts.getRawParameterValue ("auto_gain")->load() && rmsDb > -50.0f)
+    bool autoGainEnabled = autoGainParam != nullptr && autoGainParam->load() > 0.5f;
+    if (autoGainEnabled && rmsDb > -50.0f)
     {
         float targetGainDiff = -18.0f - rmsDb;
         targetGainDiff = std::clamp (targetGainDiff, -12.0f, 12.0f);
@@ -258,37 +266,29 @@ void ZherfaiAudioEngineProcessor::processBlock (juce::AudioBuffer<float>& buffer
     float currentGain = juce::Decibels::decibelsToGain (smoothedGainDb.getNextValue());
     buffer.applyGain (currentGain);
 
-    // 4. Local Cleansing: Sub-Cut & Acoustic De-Mudding
     juce::dsp::AudioBlock<float> audioBlock (buffer);
     juce::dsp::ProcessContextReplacing<float> context (audioBlock);
 
     subCutFilter.process (context);
 
-    if (apvts.getRawParameterValue ("auto_demud")->load())
+    bool deMudEnabled = autoDeMudParam != nullptr && autoDeMudParam->load() > 0.5f;
+    if (deMudEnabled)
         deMudFilter.process (context);
 
-    // 5. Dynamic De-Esser Execution
     processDeEsser (buffer);
 
-    // 6. External Control Injection from Master Brain via Mesh IPC
     if (pSharedMatrix != nullptr && assignedNodeIndex >= 0)
     {
         pSharedMatrix->channels[assignedNodeIndex].currentRmsDb.store (rmsDb);
         pSharedMatrix->channels[assignedNodeIndex].crestFactorDb.store (crestFactor);
-        pSharedMatrix->channels[assignedNodeIndex].zeroCrossingRate.store (static_cast<float> (zeroCrossings) / numSamples);
+        pSharedMatrix->channels[assignedNodeIndex].zeroCrossingRate.store (static_cast<float> (zeroCrossings) / (float)numSamples);
 
-        // Check Phase Alignment Signal
         if (pSharedMatrix->channels[assignedNodeIndex].phaseInversionRequested.load())
-        {
             buffer.applyGain (-1.0f);
-        }
 
-        // Apply Dynamic Sidechain Notch Ducking
         float duckDb = pSharedMatrix->channels[assignedNodeIndex].sidechainDuckGainDb.load();
         if (duckDb < -0.05f)
-        {
             buffer.applyGain (juce::Decibels::decibelsToGain (duckDb));
-        }
     }
 }
 
