@@ -1,7 +1,8 @@
 /*
   ==============================================================================
-  Developed by Esmaeil Riahi (UID: 2240088354) | Architecture: Anti-Gravity
-  Project: Zherfai AI - Autonomous Mixing & Mastering VST3 Suite
+    Developed by Esmaeil Riahi (UID: 2240088354) | Architecture: Anti-Gravity
+    Project: Zherfai AI - Autonomous Multi-Node Mix & Master Engine
+    Component: Zherfai Channel Strip Processor
   ==============================================================================
 */
 
@@ -9,6 +10,11 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
+#include "ZherfaiSharedMemory.h"
+
+#if JUCE_WINDOWS
+#include <windows.h>
+#endif
 
 class ZherfaiAudioEngineProcessor : public juce::AudioProcessor
 {
@@ -20,40 +26,69 @@ public:
     void releaseResources() override;
 
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
-
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
 
     juce::AudioProcessorEditor* createEditor() override;
-    bool hasEditor() const override;
+    bool hasEditor() const override { return true; }
 
-    const juce::String getName() const override;
+    const juce::String getName() const override { return "Zherfai Channel Strip"; }
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    bool isMidiEffect() const override { return false; }
+    double getTailLengthSeconds() const override { return 0.0; }
 
-    bool acceptsMidi() const override;
-    bool producesMidi() const override;
-    bool isMidiEffect() const override;
-    double getTailLengthSeconds() const override;
-
-    int getNumPrograms() override;
-    int getCurrentProgram() override;
-    void setCurrentProgram (int index) override;
-    const juce::String getProgramName (int index) override;
-    void changeProgramName (int index, const juce::String& newName) override;
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram (int) override {}
+    const juce::String getProgramName (int) override { return {}; }
+    void changeProgramName (int, const juce::String&) override {}
 
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
     juce::AudioProcessorValueTreeState apvts;
+    StemType getDetectedStemType() const { return currentStem; }
+    float getTargetGainDb() const { return smoothedGainDb.getCurrentValue(); }
 
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
+    // IPC Link
+    void initializeSharedMemory();
+    void cleanupSharedMemory();
+    void updateTelemetryToMaster();
+
+    #if JUCE_WINDOWS
+    HANDLE hMapFile = NULL;
+    ZherfaiMeshMatrix* pSharedMatrix = nullptr;
+    #else
+    ZherfaiMeshMatrix* pSharedMatrix = nullptr;
+    #endif
+
+    int assignedNodeIndex = -1;
+    StemType currentStem = STEM_UNKNOWN;
+
+    // Feature Extraction Ring & Buffers
+    static constexpr int fftOrder = 10;
+    static constexpr int fftSize = 1 << fftOrder;
+    juce::dsp::FFT forwardFFT;
+    juce::dsp::WindowingFunction<float> window;
+    std::array<float, fftSize> fifo;
+    std::array<float, fftSize * 2> fftData;
+    int fifoIndex = 0;
+    std::atomic<bool> nextFFTBlockReady { false };
+
     // DSP Processors
-    juce::dsp::ProcessorChain<
-        juce::dsp::Gain<float>,
-        juce::dsp::IIR::Filter<float>, // Mud cut (400-800Hz)
-        juce::dsp::IIR::Filter<float>, // Presence boost (2-5kHz)
-        juce::dsp::Limiter<float>
-    > dspChain;
+    juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>> subCutFilter;
+    juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>> deMudFilter;
+    juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>> deEsserBandpass;
+
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> smoothedGainDb;
+    float deEsserGainReduction = 1.0f;
+    double currentSampleRate = 44100.0;
+
+    void computeSpectralAcoustics();
+    void processDeEsser (juce::AudioBuffer<float>& buffer);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ZherfaiAudioEngineProcessor)
 };
