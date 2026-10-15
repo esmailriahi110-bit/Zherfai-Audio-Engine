@@ -1,40 +1,38 @@
-name: Build Zherfai VST3 Plugin
+# Developed by Esmaeil Riahi (UID: 2240088354) | Architecture: Anti-Gravity
+name: Zherfai CI/CD Pipeline (Windows VST3)
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "master" ]
   pull_request:
-    branches: [ "main" ]
-  workflow_dispatch:
+    branches: [ "main", "master" ]
 
 jobs:
   build-windows:
     runs-on: windows-2022
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
 
-      - name: Setup MSVC Developer Command Prompt
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
+    - name: Setup MSVC Environment
+      uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Setup CMake
-        uses: jwlawson/actions-setup-cmake@v2
-        with:
-          cmake-version: '3.28.x'
+    - name: Setup CMake
+      uses: jwlawson/actions-setup-cmake@v2
+      with:
+        cmake-version: '3.28.x'
 
-      - name: Configure CMake
-        run: |
-          cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
+    - name: Configure CMake
+      run: cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build VST3
-        run: |
-          cmake --build build --config Release --target ZherfaiAudioEngine_VST3
+    - name: Build VST3 Target
+      run: cmake --build build --config Release --target ZherfaiAudioEngine_VST3
 
-      - name: Upload VST3 Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Zherfai-ChannelStrip-Windows-x64
-          path: build/ZherfaiAudioEngine_artefacts/Release/VST3/
+    - name: Upload VST3 Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ZherfaiAudioEngine-VST3-Windows
+        path: build/ZherfaiAudioEngine_artefacts/Release/VST3/
