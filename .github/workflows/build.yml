@@ -1,45 +1,37 @@
-# Developed by Esmaeil Riahi (UID: 2240088354) | Architecture: Anti-Gravity
-name: Zherfai CI/CD Pipeline (Windows VST3)
+name: Build Zherfai VST3 Suite
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ "main" ]
 
 jobs:
   build-windows:
     runs-on: windows-2022
-
     env:
       JUCE_DISABLE_VST3_MANIFEST_CHECK: 1
 
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
 
-    - name: Setup MSVC Environment
-      uses: ilammy/msvc-dev-cmd@v1
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '3.28.x'
 
-    - name: Setup CMake
-      uses: jwlawson/actions-setup-cmake@v2
-      with:
-        cmake-version: '3.28.x'
+      - name: Configure CMake
+        run: >
+          cmake -B build -G "Visual Studio 17 2022" -A x64
+          -DCMAKE_BUILD_TYPE=Release
+          -DJUCE_BUILD_HELPER_APPLICATIONS=OFF
 
-    - name: Configure CMake
-      run: |
-        cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_BUILD_HELPER_APPLICATIONS=OFF
+      - name: Build VST3 Target
+        run: cmake --build build --config Release --target ZherfaiAudioEngine_VST3 -- /v:m
 
-    - name: Build Plugin
-      run: |
-        cmake --build build --config Release --target ZherfaiAudioEngine_VST3 -- /v:m
-
-    - name: Upload VST3 Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ZherfaiAudioEngine-VST3-Windows
-        path: |
-          build/ZherfaiAudioEngine_artefacts/Release/VST3/
-          build/Release/ZherfaiAudioEngine.vst3
+      - name: Upload VST3 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zherfai-Channel-Strip-VST3-x64
+          path: build/ZherfaiAudioEngine_artefacts/Release/VST3/Zherfai Channel Strip.vst3
