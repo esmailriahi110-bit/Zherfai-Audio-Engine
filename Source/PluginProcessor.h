@@ -1,30 +1,22 @@
-/*
-  ==============================================================================
-    Developed by Esmaeil Riahi (UID: 2240088354) | Architecture: Anti-Gravity
-    Project: Zherfai AI - Autonomous Multi-Node Mix & Master Engine
-    Component: Zherfai Channel Strip Processor
-  ==============================================================================
-*/
-
 #pragma once
-
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
+#include <array>
+#include <atomic>
 #include "ZherfaiSharedMemory.h"
 
 #if JUCE_WINDOWS
 #include <windows.h>
 #endif
 
-class ZherfaiAudioEngineProcessor : public juce::AudioProcessor
+class ZherfaiAudioEngineAudioProcessor : public juce::AudioProcessor
 {
 public:
-    ZherfaiAudioEngineProcessor();
-    ~ZherfaiAudioEngineProcessor() override;
+    ZherfaiAudioEngineAudioProcessor();
+    ~ZherfaiAudioEngineAudioProcessor() override;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
-
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
 
@@ -39,60 +31,49 @@ public:
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
-    void setCurrentProgram (int) override {}
-    const juce::String getProgramName (int) override { return {}; }
-    void changeProgramName (int, const juce::String&) override {}
+    void setCurrentProgram (int /*index*/) override {}
+    const juce::String getProgramName (int /*index*/) override { return {}; }
+    void changeProgramName (int /*index*/, const juce::String& /*newName*/) override {}
 
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    StemType getDetectedStemType() const { return currentStem; }
-    float getTargetGainDb() const { return smoothedGainDb.getCurrentValue(); }
-
     juce::AudioProcessorValueTreeState apvts;
 
+    // متدهای کمکی برای UI
+    float getSmoothedGain() const { return smoothedGain.getTargetValue(); }
+    ZherfaiStemType getCurrentStem() const { return detectedStem.load(); }
+    bool isConnectedToMesh() const { return pSharedMatrix != nullptr; }
+
 private:
-    static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+    juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
-    void initializeSharedMemory();
-    void cleanupSharedMemory();
-
-    #if JUCE_WINDOWS
-    HANDLE hMapFile = NULL;
-    ZherfaiMeshMatrix* pSharedMatrix = nullptr;
-    #else
-    ZherfaiMeshMatrix* pSharedMatrix = nullptr;
-    #endif
-
-    int assignedNodeIndex = -1;
-    StemType currentStem = STEM_UNKNOWN;
-
-    // Feature Extraction Ring & Buffers
-    static constexpr int fftOrder = 10;
-    static constexpr int fftSize = 1 << fftOrder;
-    juce::dsp::FFT forwardFFT;
-    juce::dsp::WindowingFunction<float> window;
-    std::array<float, fftSize> fifo;
-    std::array<float, fftSize * 2> fftData;
-    int fifoIndex = 0;
-
-    // DSP Processors
+    // DSP Components
     juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>> subCutFilter;
     juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>> deMudFilter;
-    juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>> deEsserBandpass;
+    juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>> deEssFilter;
+    
+    juce::LinearSmoothedValue<float> smoothedGain;
 
-    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> smoothedGainDb;
-    float deEsserGainReduction = 1.0f;
-    double currentSampleRate = 44100.0;
+    // FFT & Analysis
+    enum { fftOrder = 10, fftSize = 1 << fftOrder };
+    juce::dsp::FFT forwardFFT;
+    juce::dsp::WindowingFunction<float> window;
+    std::array<float, fftSize> fftData;
+    int fifoIndex = 0;
 
-    // Parameter Pointers
-    std::atomic<float>* autoGainParam = nullptr;
-    std::atomic<float>* autoDeMudParam = nullptr;
-    std::atomic<float>* autoDeEssParam = nullptr;
-    std::atomic<float>* stemOverrideParam = nullptr;
+    // Shared Memory IPC
+    #if JUCE_WINDOWS
+    HANDLE hMapFile = nullptr;
+    #endif
+    ZherfaiMeshMatrix* pSharedMatrix = nullptr;
+    int assignedNodeIndex = -1;
+    std::atomic<ZherfaiStemType> detectedStem{STEM_UNKNOWN};
 
-    void computeSpectralAcoustics();
-    void processDeEsser (juce::AudioBuffer<float>& buffer);
+    void initSharedMemory();
+    void cleanupSharedMemory();
+    void updateTelemetryAndMesh(const juce::AudioBuffer<float>& buffer);
+    void processDeEsserAndDynamics(juce::AudioBuffer<float>& buffer);
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ZherfaiAudioEngineProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ZherfaiAudioEngineAudioProcessor)
 };
