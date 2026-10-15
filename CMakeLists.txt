@@ -6,8 +6,9 @@ project(ZherfaiAudioEngine VERSION 2.5.0 LANGUAGES CXX C)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Disable JUCE helper tools that crash headless CI runners (Critical Fix for Windows CI)
+# CRITICAL FIX: Disable JUCE helper applications and VST3 manifest validation that crash headless CI
 set(JUCE_BUILD_HELPER_APPLICATIONS OFF CACHE BOOL "" FORCE)
+set(JUCE_VST3_CAN_REPLACE_VST2 0)
 
 # Fetch JUCE Framework (Pinned to stable v7.0.9)
 include(FetchContent)
