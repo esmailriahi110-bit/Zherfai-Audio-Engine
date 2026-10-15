@@ -1,35 +1,38 @@
-/*
-  ==============================================================================
-    Developed by Esmaeil Riahi (UID: 2240088354) | Architecture: Anti-Gravity
-    Project: Zherfai AI - Autonomous Multi-Node Mix & Master Engine
-    Component: Channel Strip Studio Display
-  ==============================================================================
-*/
-
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
-ZherfaiAudioEngineEditor::ZherfaiAudioEngineEditor (ZherfaiAudioEngineProcessor& p)
+ZherfaiAudioEngineEditor::ZherfaiAudioEngineEditor (ZherfaiAudioEngineAudioProcessor& p)
     : AudioProcessorEditor (&p), audioProcessor (p)
 {
-    setSize (640, 380);
+    setSize (720, 460);
 
-    titleLabel.setText ("ZHERFAI MESH // NODE CHANNEL STRIP", juce::dontSendNotification);
-    titleLabel.setFont (juce::FontOptions (16.0f, juce::Font::bold));
-    titleLabel.setColour (juce::Label::textColourId, juce::Colour (0xFF00E5FF));
-    addAndMakeVisible (titleLabel);
+    // استایل‌دهی سلکتور استم
+    stemSelector.addItem ("Auto Detect (AI)", 1);
+    stemSelector.addItem ("Sub / 808 / Kick", 2);
+    stemSelector.addItem ("Lead Vocal", 3);
+    stemSelector.addItem ("Drums / Percussion", 4);
+    stemSelector.addItem ("Harmonics / Instruments", 5);
+    stemSelector.setSelectedId (1);
+    addAndMakeVisible (stemSelector);
 
-    stemLabel.setText ("ROLE: ANALYZING...", juce::dontSendNotification);
-    stemLabel.setFont (juce::FontOptions (14.0f, juce::Font::bold));
-    stemLabel.setColour (juce::Label::textColourId, juce::Colour (0xFF9ECE6A));
-    addAndMakeVisible (stemLabel);
+    // دکمه‌های مدرن وضعیت پردازش
+    auto configureButton = [this](juce::ToggleButton& btn) {
+        btn.setColour(juce::ToggleButton::textColourId, juce::Colour(0xFFD6E2F0));
+        btn.setColour(juce::ToggleButton::tickColourId, juce::Colour(0xFF00FFCC));
+        addAndMakeVisible(btn);
+    };
 
-    gainLabel.setText ("GAIN OFFSET: 0.0 dB", juce::dontSendNotification);
-    gainLabel.setFont (juce::FontOptions (13.0f, juce::Font::plain));
-    gainLabel.setColour (juce::Label::textColourId, juce::Colour (0xFF7DCFFF));
-    addAndMakeVisible (gainLabel);
+    configureButton(autoGainButton);
+    configureButton(deMudButton);
+    configureButton(deEssButton);
 
-    startTimerHz (24); // 24 FPS UI Refresh
+    // اتصال به متغیرهای DSP
+    autoGainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, "auto_gain", autoGainButton);
+    deMudAttachment    = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, "auto_demud", deMudButton);
+    deEssAttachment    = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, "auto_deess", deEssButton);
+    stemAttachment     = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, "stem_override", stemSelector);
+
+    startTimerHz (30); // رفرش روان ۳۰ فریم بر ثانیه برای میترها
 }
 
 ZherfaiAudioEngineEditor::~ZherfaiAudioEngineEditor()
@@ -39,57 +42,96 @@ ZherfaiAudioEngineEditor::~ZherfaiAudioEngineEditor()
 
 void ZherfaiAudioEngineEditor::timerCallback()
 {
-    StemType stem = audioProcessor.getDetectedStemType();
-    juce::String stemStr = "ROLE: ";
-    switch (stem)
-    {
-        case STEM_SUB_LOW:      stemStr += "SUB_LOW [KICK/BASS]"; break;
-        case STEM_VOCAL_LEAD:   stemStr += "VOCAL_LEAD [ACTIVE POCKET]"; break;
-        case STEM_PERCUSSION:   stemStr += "PERCUSSION [TRANSIENT FOCUS]"; break;
-        case STEM_HARMONIC_PADS:stemStr += "HARMONIC_PADS [MID-SUSTAIN]"; break;
-        default:                stemStr += "ANALYZING ACOUSTICS..."; break;
-    }
-    stemLabel.setText (stemStr, juce::dontSendNotification);
-
-    float gainDb = audioProcessor.getTargetGainDb();
-    gainLabel.setText ("AUTO GAIN COMP: " + juce::String (gainDb, 1) + " dB (Target -18 dBFS)", juce::dontSendNotification);
-
+    // دریافت میزان خروجی و پردازش از موتور برای انیمیشن
+    currentGainReduction = audioProcessor.getSmoothedGain();
     repaint();
 }
 
 void ZherfaiAudioEngineEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (juce::Colour (0xFF0F1115));
+    // ۱. پس‌زمینه گرادیان عمیق استودیویی
+    juce::ColourGradient bgGradient(juce::Colour(0xFF0B0E14), 0, 0,
+                                   juce::Colour(0xFF141A24), 0, (float)getHeight(), false);
+    g.setGradientFill(bgGradient);
+    g.fillAll();
 
-    // Console Enclosure
-    juce::Rectangle<float> mainBox (20.0f, 60.0f, (float)getWidth() - 40.0f, (float)getHeight() - 100.0f);
-    g.setColour (juce::Colour (0xFF161920));
-    g.fillRoundedRectangle (mainBox, 6.0f);
-    g.setColour (juce::Colour (0xFF262D3D));
-    g.drawRoundedRectangle (mainBox, 6.0f, 1.2f);
+    // ۲. هدر بالایی (Header Panel)
+    g.setColour(juce::Colour(0xFF1B2332));
+    g.fillRect(0, 0, getWidth(), 64);
 
-    // Active Processing Stack
-    g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
-    g.setColour (juce::Colour (0xFF8A99AD));
-    g.drawText ("ACTIVE NODE REAL-TIME PROTOCOLS", 40, 80, 400, 20, juce::Justification::left);
+    g.setColour(juce::Colour(0xFF00FFCC));
+    g.setFont(juce::Font(22.0f, juce::Font::bold));
+    g.drawText("ZHERFAI AUDIO ENGINE", 24, 12, 350, 24, juce::Justification::left);
 
-    g.setFont (juce::FontOptions (12.0f, juce::Font::plain));
-    g.setColour (juce::Colour (0xFFE0AF68));
-    g.drawText ("[*] Sub-Cut 32Hz (18 dB/oct) Steep High-Pass Active", 40, 190, 500, 20, juce::Justification::left);
-    g.drawText ("[*] De-Mudding Filter: Dynamic Notch Monitoring @ 320 Hz", 40, 220, 500, 20, juce::Justification::left);
-    g.drawText ("[*] Dynamic De-Esser: Fast-Attack Peak Attenuation (6.8 kHz Band)", 40, 250, 500, 20, juce::Justification::left);
-    g.drawText ("[*] Mesh IPC Shared Memory: Connected to Master Brain Bus", 40, 280, 500, 20, juce::Justification::left);
+    g.setColour(juce::Colour(0xFF6B7D96));
+    g.setFont(juce::Font(12.0f, juce::Font::plain));
+    g.drawText("AUTONOMOUS MESH MIXER // ARCHITECTURE v2.5", 25, 36, 350, 18, juce::Justification::left);
 
-    // Signature
-    g.setColour (juce::Colour (0xFF4A5568));
-    g.setFont (juce::FontOptions (11.0f));
-    g.drawText ("Developed by Esmaeil Riahi (UID: 2240088354) | Architecture: Anti-Gravity",
-                0, getHeight() - 25, getWidth(), 20, juce::Justification::centred);
+    // وضعیت اتصال به شبکه مش (Mesh Status Pill)
+    bool meshConnected = audioProcessor.isConnectedToMesh();
+    juce::Colour statusCol = meshConnected ? juce::Colour(0xFF00FF88) : juce::Colour(0xFFFF5555);
+    g.setColour(statusCol.withAlpha(0.2f));
+    g.fillRoundedRectangle(getWidth() - 175.0f, 18.0f, 150.0f, 28.0f, 14.0f);
+    g.setColour(statusCol);
+    g.drawRoundedRectangle(getWidth() - 175.0f, 18.0f, 150.0f, 28.0f, 14.0f, 1.2f);
+    g.fillEllipse(getWidth() - 162.0f, 28.0f, 8.0f, 8.0f);
+    g.setFont(juce::Font(11.0f, juce::Font::bold));
+    g.drawText(meshConnected ? "MESH LINKED" : "STANDALONE", getWidth() - 148, 18, 115, 28, juce::Justification::centredLeft);
+
+    // ۳. پنل اصلی مانیتورینگ صوتی
+    auto monitorArea = juce::Rectangle<float>(24.0f, 80.0f, getWidth() - 48.0f, 220.0f);
+    g.setColour(juce::Colour(0xFF0E121A));
+    g.fillRoundedRectangle(monitorArea, 8.0f);
+    g.setColour(juce::Colour(0xFF222B3D));
+    g.drawRoundedRectangle(monitorArea, 8.0f, 1.5f);
+
+    // تشخیص زنده استم (Stem Badge)
+    juce::String stemStr = "ANALYZING...";
+    switch (audioProcessor.getCurrentStem()) {
+        case STEM_SUB_LOW:       stemStr = "ROLE: SUB / BASS ANCHOR"; break;
+        case STEM_VOCAL_LEAD:    stemStr = "ROLE: LEAD VOCAL FOCUS"; break;
+        case STEM_PERCUSSION:    stemStr = "ROLE: PERCUSSION PUNCH"; break;
+        case STEM_HARMONIC_PADS: stemStr = "ROLE: INSTRUMENT HARMONY"; break;
+        default: break;
+    }
+
+    g.setColour(juce::Colour(0xFF00D4FF));
+    g.setFont(juce::Font(14.0f, juce::Font::bold));
+    g.drawText(stemStr, 40, 96, 400, 20, juce::Justification::left);
+
+    // خط نمایش نئونی گین خودکار
+    g.setColour(juce::Colour(0xFF6B7D96));
+    g.setFont(juce::Font(12.0f, juce::Font::plain));
+    g.drawText("AUTO GAIN TARGET: -18 dBFS", 40, 130, 250, 18, juce::Justification::left);
+
+    float meterWidth = (getWidth() - 96.0f);
+    float gainCompWidth = juce::jlimit(10.0f, meterWidth, (currentGainReduction / 2.0f) * meterWidth);
+
+    g.setColour(juce::Colour(0xFF1B2230));
+    g.fillRoundedRectangle(40.0f, 155.0f, meterWidth, 14.0f, 7.0f);
+
+    juce::ColourGradient meterGrad(juce::Colour(0xFF00FFCC), 40.0f, 155.0f,
+                                 juce::Colour(0xFF0088FF), 40.0f + gainCompWidth, 155.0f, false);
+    g.setGradientFill(meterGrad);
+    g.fillRoundedRectangle(40.0f, 155.0f, gainCompWidth, 14.0f, 7.0f);
+
+    // راهنمای ماژول‌های فعال
+    g.setColour(juce::Colour(0xFF90A4AE));
+    g.setFont(juce::Font(11.0f, juce::Font::plain));
+    g.drawText("[DSP ACTIVE] Phase Alignment: ON | Dynamic Low-End Unmasking: ON", 40, 190, 500, 20, juce::Justification::left);
+    g.drawText("[MASTER PROTOCOL] EBU R128 (-14 LUFS Target Profile)", 40, 210, 500, 20, juce::Justification::left);
+
+    // ۴. فوتر پروژه
+    g.setColour(juce::Colour(0xFF404E63));
+    g.setFont(juce::Font(10.5f, juce::Font::plain));
+    g.drawText("Engineered by Esmaeil Riahi // Zherfai Multi-Track Mesh Suite", 24, getHeight() - 25, getWidth() - 48, 16, juce::Justification::centred);
 }
 
 void ZherfaiAudioEngineEditor::resized()
 {
-    titleLabel.setBounds (20, 15, 450, 25);
-    stemLabel.setBounds (40, 115, 500, 25);
-    gainLabel.setBounds (40, 145, 500, 25);
+    // قرارگیری کنترلرها در پنل پایینی
+    stemSelector.setBounds (40, 318, 200, 32);
+    autoGainButton.setBounds (260, 318, 190, 32);
+    deMudButton.setBounds (460, 318, 160, 32);
+    deEssButton.setBounds (260, 358, 190, 32);
 }
