@@ -6,11 +6,10 @@ project(ZherfaiAudioEngine VERSION 2.5.0 LANGUAGES CXX C)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# CRITICAL FIX: Disable JUCE helper applications and VST3 manifest validation that crash headless CI
+# Disable manifest helper executables that crash headless GitHub Actions runners
 set(JUCE_BUILD_HELPER_APPLICATIONS OFF CACHE BOOL "" FORCE)
-set(JUCE_VST3_CAN_REPLACE_VST2 0)
 
-# Fetch JUCE Framework (Pinned to stable v7.0.9)
+# Fetch JUCE Framework
 include(FetchContent)
 FetchContent_Declare(
     juce
@@ -32,9 +31,10 @@ juce_add_plugin(ZherfaiAudioEngine
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     PLUGIN_MANUFACTURER_CODE "Zhrf"
     PLUGIN_CODE "Zh01"
+    VST3_AUTO_MANIFEST FALSE
 )
 
-# Source Files Inclusion
+# Source Files
 target_sources(ZherfaiAudioEngine
     PRIVATE
         Source/PluginProcessor.cpp
@@ -44,12 +44,13 @@ target_sources(ZherfaiAudioEngine
         Source/ZherfaiSharedMemory.h
 )
 
-# Compiler Definitions & Optimizations
+# Compiler Definitions
 target_compile_definitions(ZherfaiAudioEngine
     PUBLIC
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_VST3_CAN_REPLACE_VST2=0
+        JUCE_DISABLE_VST3_MANIFEST_CHECK=1
 )
 
 # Link JUCE Modules
