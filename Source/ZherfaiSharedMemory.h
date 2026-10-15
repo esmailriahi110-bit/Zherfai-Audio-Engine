@@ -1,59 +1,40 @@
-/*
-  ==============================================================================
-    Developed by Esmaeil Riahi (UID: 2240088354) | Architecture: Anti-Gravity
-    Project: Zherfai AI - Autonomous Multi-Node Mix & Master Engine
-    Component: Mesh Topology & Shared Memory Declarations
-  ==============================================================================
-*/
-
 #pragma once
-
-#include <atomic>
 #include <cstdint>
 
-#define ZHERFAI_SHM_NAME "Local\\Zherfai_Mesh_Matrix_Buffer"
+#define ZHERFAI_SHM_NAME "Local\\Zherfai_Mesh_Matrix_Buffer_v2"
 #define ZHERFAI_MAX_CHANNELS 32
 
-enum StemType : int32_t
-{
+enum ZherfaiStemType {
     STEM_UNKNOWN = 0,
-    STEM_SUB_LOW = 1,
-    STEM_VOCAL_LEAD = 2,
-    STEM_PERCUSSION = 3,
-    STEM_HARMONIC_PADS = 4
+    STEM_SUB_LOW,      // کیک و ساب‌بیس
+    STEM_VOCAL_LEAD,   // وکال اصلی
+    STEM_PERCUSSION,   // اسنیر، های‌هت و پرکاشن
+    STEM_HARMONIC_PADS // گیتار، پیانو، سینت و پدها
 };
 
-enum GenreProfile : int32_t
-{
+enum ZherfaiGenreProfile {
     GENRE_BALANCED = 0,
-    GENRE_HIPHOP_TRAP = 1,
-    GENRE_POP_VOCAL = 2,
-    GENRE_ROCK_ACOUSTIC = 3,
-    GENRE_EDM = 4
+    GENRE_HIPHOP_TRAP,
+    GENRE_POP_VOCAL,
+    GENRE_ROCK_ACOUSTIC,
+    GENRE_EDM
 };
 
-// Align to 64-byte boundary to guarantee atomic operations validity and prevent false sharing
-struct alignas(64) ZherfaiChannelTelemetry
-{
-    std::atomic<bool> isActive{false};
-    std::atomic<int32_t> channelId{0};
-    std::atomic<StemType> detectedStem{STEM_UNKNOWN};
-    
-    std::atomic<float> currentRmsDb{-100.0f};
-    std::atomic<float> spectralCentroidHz{0.0f};
-    std::atomic<float> zeroCrossingRate{0.0f};
-    std::atomic<float> crestFactorDb{0.0f};
-
-    // Master Brain Real-Time Directives
-    std::atomic<float> sidechainDuckGainDb{0.0f};
-    std::atomic<float> dynamicDeMudGainDb{0.0f};
-    std::atomic<float> vocalPocketCutDb{0.0f};
-    std::atomic<bool> phaseInversionRequested{false};
+struct ZherfaiChannelTelemetry {
+    volatile int isActive;
+    volatile int channelId;
+    volatile int stemType;
+    float currentRmsDb;
+    float spectralCentroid;
+    float crestFactor;
+    float sidechainDuckGainDb;
+    float dynamicDeMudGainDb;
+    float vocalPocketCutDb;
+    volatile int phaseInversionRequested;
 };
 
-struct alignas(64) ZherfaiMeshMatrix
-{
-    std::atomic<int32_t> totalActiveNodes{0};
-    std::atomic<GenreProfile> activeGenreProfile{GENRE_BALANCED};
+struct ZherfaiMeshMatrix {
+    volatile int totalActiveNodes;
+    volatile int activeGenre;
     ZherfaiChannelTelemetry channels[ZHERFAI_MAX_CHANNELS];
 };
